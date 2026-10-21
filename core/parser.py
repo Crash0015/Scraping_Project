@@ -2,13 +2,13 @@ import json
 from bs4 import BeautifulSoup
 
 class TikTokParser:
-    """Procesador DOM configurado para extraer metadatos de perfil y lista de publicaciones."""
+    """Procesador DOM configurado para extraer metadatos de perfil y publicaciones."""
 
     def __init__(self, markup: str) -> None:
         self.soup = BeautifulSoup(markup, "html.parser")
 
     def extract_user_summary(self) -> dict:
-        """Extrae métricas generales del perfil objetivo."""
+        """Extraemos las métricas generales del perfil objetivo."""
         script_tag = self.soup.find("script", id="__UNIVERSAL_DATA_FOR_REHYDRATION__")
         if script_tag and script_tag.string:
             try:
@@ -39,21 +39,18 @@ class TikTokParser:
             "nickname": h1_tag.get_text(strip=True) if h1_tag else "No detectado",
         }
 
-    def extract_rendered_videos(self) -> list[dict]:
-        """Extrae los enlaces y descripciones visibles en la cuadrícula de videos."""
+    def extract_rendered_videos(self, limit: int = 10) -> list[dict]:
+        """Extraemos las publicaciones visibles en la cuadricla limitadas a 10 elementos."""
         videos = []
-        # Los contenedores de video en la cuadrícula pública usan el atributo data-e2e='user-post-item'
         post_items = self.soup.find_all("div", attrs={"data-e2e": "user-post-item"})
 
         for item in post_items:
             link_tag = item.find("a")
             video_url = link_tag.get("href", "") if link_tag else ""
 
-            # Extraer texto descriptivo o título del video si está disponible
             desc_tag = item.find("img") or item.find("a")
             description = desc_tag.get("alt", "") if desc_tag and desc_tag.has_attr("alt") else ""
 
-            # Vistas aproximadas visibles en la miniatura
             views_tag = item.find("strong", attrs={"data-e2e": "video-views"})
             views = views_tag.get_text(strip=True) if views_tag else "N/D"
 
@@ -64,4 +61,5 @@ class TikTokParser:
                     "views": views,
                 })
 
-        return videos
+        # Retornamos unicamente los primeros N elementos especificados, en este caso 10.
+        return videos[:limit]
