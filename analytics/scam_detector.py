@@ -9,13 +9,17 @@ load_dotenv()
 
 
 class FinancialScamAuditor:
-    """Motor de detección de riesgo mediante Embeddings Densos remotos (Google gemini-embedding-001)."""
+    """Motor de detección de riesgo mediante Embeddings Densos remotos (Google gemini-embedding-001).
+
+    Evalúa biografía y publicaciones en un espacio semántico continuo.
+    """
 
     def __init__(self) -> None:
         self.api_key = os.getenv("GEMINI_API_KEY")
         if not self.api_key:
             raise ValueError(
-                "No se encontró GEMINI_API_KEY en el entorno ni en el archivo .env"
+                "No se encontró GEMINI_API_KEY en el entorno ni en el archivo"
+                " .env"
             )
 
         self.api_url = (
@@ -23,7 +27,7 @@ class FinancialScamAuditor:
             f"gemini-embedding-001:batchEmbedContents?key={self.api_key}"
         )
 
-        # Patrones canónicos de captación y fraude en redes
+        # Vectores canónicos de captación y fraude en redes
         self.scam_patterns = {
             "RENTABILIDAD_FACIL": (
                 "ganar dinero facil rapido en dolares desde casa con celular"
@@ -35,11 +39,11 @@ class FinancialScamAuditor:
             ),
             "DESVIO_CANAL_PRIVADO": (
                 "escribeme al whatsapp o telegram cupos limitados ingresa al"
-                " link de mi perfil linkbio"
+                " link de mi perfil linkbio hotmart"
             ),
             "URGENCIA_PIRAMIDAL": (
                 "oportunidad de negocio cambia tu vida financiera ultimos cupos"
-                " escribe ya"
+                " escribe ya deja tu trabajo"
             ),
         }
         self.pattern_labels = list(self.scam_patterns.keys())
@@ -94,23 +98,32 @@ class FinancialScamAuditor:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
 
-        videos = data.get("videos", [])
         profile = data.get("profile", {})
+        videos = data.get("videos", [])
         username = profile.get("username", "desconocido")
 
-        # Limpiar texto de plantillas sin descartar el video
-        valid_posts = []
-        cleaned_descriptions = []
+        # 1. Recolección de textos y metadatos (Biografía + Videos)
+        texts_to_analyze = []
+        text_metadata = []
 
+        # Evaluar biografía si existe
+        bio = profile.get("bio", "").strip()
+        if bio:
+            texts_to_analyze.append(bio)
+            text_metadata.append({
+                "origin": "BIOGRAFÍA",
+                "url": f"https://www.tiktok.com/@{username}",
+                "raw_text": bio,
+            })
+
+        # Evaluar publicaciones limpiando plantillas
         for v in videos:
             desc = v.get("description", "").strip()
             if not desc:
                 continue
 
-            # Si es solo la plantilla estándar de TikTok, extraer lo útil
             clean_text = desc
             if clean_text.lower().startswith("creado por"):
-                # Quitar el prefijo automático si existe contenido posterior
                 parts = clean_text.split("con la música")
                 clean_text = (
                     parts[0]
@@ -119,36 +132,36 @@ class FinancialScamAuditor:
                     .strip()
                 )
 
-            # Si quedó texto significativo (más de 3 letras), lo agregamos
-            if len(clean_text) > 3:
-                valid_posts.append(v)
-                cleaned_descriptions.append(clean_text)
-            elif len(desc) > 3:
-                # Si no se pudo limpiar pero hay texto original, conservarlo
-                valid_posts.append(v)
-                cleaned_descriptions.append(desc)
+            final_text = clean_text if len(clean_text) > 3 else desc
+            if len(final_text) > 3:
+                texts_to_analyze.append(final_text)
+                text_metadata.append({
+                    "origin": "PUBLICACIÓN",
+                    "url": v.get("url", ""),
+                    "raw_text": final_text,
+                })
 
-        if not valid_posts:
+        if not texts_to_analyze:
             return {
                 "audited_profile": f"@{username}",
-                "posts_analyzed": 0,
-                "flagged_posts_count": 0,
+                "elements_analyzed": 0,
+                "flagged_events_count": 0,
                 "global_risk_index": "0.0 / 100",
                 "verdict": (
-                    "PERFIL CONFORME (Publicaciones sin texto descriptivo"
-                    " extraíble)"
+                    "PERFIL CONFORME (Sin texto descriptivo ni biografía"
+                    " analizable)"
                 ),
                 "flagged_cases": [],
             }
 
         print(
-            f"[*] Generando embeddings para {len(cleaned_descriptions)}"
-            " publicaciones..."
+            f"[*] Generando embeddings para {len(texts_to_analyze)} elementos"
+            f" (1 biografía + {len(texts_to_analyze) - (1 if bio else 0)} videos)..."
         )
-        content_embeddings = self._get_embeddings(cleaned_descriptions)
+        content_embeddings = self._get_embeddings(texts_to_analyze)
 
         flagged_events = []
-        max_scores_per_post = []
+        max_scores_per_element = []
 
         for i, post_vec in enumerate(content_embeddings):
             post_scores = [
@@ -159,29 +172,37 @@ class FinancialScamAuditor:
                 max(range(len(post_scores)), key=lambda k: post_scores[k])
             )
             max_score = post_scores[max_sim_idx]
-            max_scores_per_post.append(max_score)
+            max_scores_per_element.append(max_score)
 
-            # Umbral calibrado para detección real
-            if max_score >= 0.72:
+            # Umbral de similitud semántica calibrada
+            if max_score >= 0.70:
+                meta = text_metadata[i]
                 flagged_events.append({
-                    "url": valid_posts[i].get("url"),
+                    "origin": meta["origin"],
+                    "url": meta["url"],
                     "matched_pattern": self.pattern_labels[max_sim_idx],
                     "confidence": f"{round(max_score * 100, 2)}%",
-                    "excerpt": cleaned_descriptions[i],
+                    "excerpt": meta["raw_text"],
                 })
 
         risk_score = round(
-            (sum(max_scores_per_post) / len(max_scores_per_post)) * 100, 2
+            (sum(max_scores_per_element) / len(max_scores_per_element)) * 100, 2
         )
+
+        # Criterio de veredicto:
+        # Se declara alto riesgo si hay al menos 2 eventos marcados,
+        # O si la biografía directamente es clasificada como patrón de captación.
+        bio_flagged = any(e["origin"] == "BIOGRAFÍA" for e in flagged_events)
+        is_high_risk = len(flagged_events) >= 2 or bio_flagged
 
         return {
             "audited_profile": f"@{username}",
-            "posts_analyzed": len(cleaned_descriptions),
-            "flagged_posts_count": len(flagged_events),
+            "elements_analyzed": len(texts_to_analyze),
+            "flagged_events_count": len(flagged_events),
             "global_risk_index": f"{risk_score} / 100",
             "verdict": (
                 "PERFIL DE ALTO RIESGO (Patrón de Captación Detectado)"
-                if len(flagged_events) >= 2
+                if is_high_risk
                 else "PERFIL CONFORME (Bajo Riesgo)"
             ),
             "flagged_cases": flagged_events,
