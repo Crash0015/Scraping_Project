@@ -1,8 +1,6 @@
-# TikTok Data Extraction Pipeline
+# TikTok Data Extraction & Semantic Fraud Auditor Pipeline
 
-Solución modular de web scraping en Python diseñada bajo una arquitectura desacoplada por capas para la extracción de metadatos, métricas públicas y publicaciones dinámicas desde perfiles de TikTok. 
-
-El proyecto resuelve los retos asociados a las aplicaciones de página única (SPA), la renderización dinámica con JavaScript y la persistencia estructurada de datos.
+Solución integral y modular en Python diseñada bajo una arquitectura desacoplada por capas. Combina técnicas de web scraping avanzado sobre Single Page Applications (SPA) y procesamiento de lenguaje natural (NLP) basado en **embeddings vectoriales densos** para auditar perfiles públicos de TikTok, identificando patrones de captación ilegal, pirámides y esquemas de fraude financiero.
 
 ---
 
@@ -10,52 +8,56 @@ El proyecto resuelve los retos asociados a las aplicaciones de página única (S
 
 | Componente / Librería | Rol en la Arquitectura | Justificación Técnica |
 | :--- | :--- | :--- |
-| **Python 3.12+** | Runtime principal | Lenguaje base tipado con soporte nativo de estructuras de datos y manejo de I/O. |
-| **Playwright (`sync_api`)** | Motor de red y renderizado | Permite instanciar un navegador Chromium desatendido (*headless*), ejecutar el motor JavaScript V8 del sitio objetivo, resolver firmas criptográficas dinámicas y simular *scroll* de pantalla. |
+| **Python 3.12+** | Runtime principal | Lenguaje base tipado con soporte nativo de estructuras de datos y manejo eficiente de I/O. |
+| **Playwright (`sync_api`)** | Motor de red y renderizado | Instancia un Chromium desatendido (*headless*), ejecuta el motor JavaScript V8 del sitio objetivo, resuelve firmas criptográficas dinámicas y simula desplazamiento de pantalla (*scroll*). |
 | **BeautifulSoup4** | Procesamiento del DOM | Analizador de árbol sintáctico HTML rápido y eficiente en memoria para extraer selectores CSS y bloques de datos estructurados. |
-| **JSON Standard Lib** | Serialización y persistencia | Transformación del estado embebido de hidratación universal y almacenamiento persistente en disco. |
+| **Google Gemini API (`gemini-embedding-001`)** | Motor de Inferencia NLP | Genera representaciones vectoriales densas de 768 dimensiones en un espacio semántico continuo para inferir intencionalidad más allá de simples palabras clave. |
+| **Requests & Python-Dotenv** | Conectividad y Seguridad | Cliente HTTP desacoplado para consultar endpoints REST con rate limits optimizados y gestión de secretos fuera del control de versiones (`.env`). |
+| **JSON Standard Lib** | Serialización y persistencia | Transformación del estado embebido de hidratación universal y almacenamiento estructurado local. |
 
 ---
 
 ## 2. Mapa Arquitectónico y Flujo de Datos
 
-El diseño sigue el principio de responsabilidad única (SRP), separando completamente la navegación web, el parseo de datos y la exportación de resultados:
+El diseño sigue el principio de responsabilidad única (SRP), separando la navegación web, el parseo de datos, la persistencia y la auditoría analítica:
 
 ```text
 [ TikTok Platform (SPA) ]
-           │
-           │  1. Navegación, bypass de renderizado inicial
-           │     y ejecución de scroll dinámico
-           ▼
+            │
+            │  1. Navegación, bypass de renderizado inicial y scroll dinámico
+            ▼
 ┌────────────────────────────────────────┐
-│        core/client.py                  │
-│       (TikTokClient - Playwright)      │
+│         core/client.py                 │
+│        (TikTokClient - Playwright)     │
 │  - Instancia Chromium en modo headless │
 │  - Configura User-Agent y Viewport     │
-│  - Obtiene DOM renderizado en memoria  │
+│  - Devuelve DOM renderizado en memoria │
 └───────────────────┬────────────────────┘
                     │
                     │  2. HTML completamente hidratado (str)
                     ▼
 ┌────────────────────────────────────────┐
-│        core/parser.py                  │
-│       (TikTokParser - BeautifulSoup4)  │
+│         core/parser.py                 │
+│        (TikTokParser - BeautifulSoup4) │
 │  - Extrae '__UNIVERSAL_DATA_...'       │
-│  - Mapea métricas de usuario           │
-│  - Extrae URLs, vistas y captions      │
-└───────────────────┬────────────────────┘
-                    │
-                    │  3. Diccionarios tipados de Python (dict / list)
-                    ▼
-┌────────────────────────────────────────┐
-│        core/exporter.py                │
-│       (DataExporter - File I/O)        │
-│  - Serializa la estructura de datos    │
-│  - Persiste el archivo en formato JSON │
-└───────────────────┬────────────────────┘
-                    │
-                    ▼
-       [ perfil_{username}.json ]
+│  - Mapea métricas de usuario y bio     │
+│  - Limpia ruido de plantillas de audio │
+│  - Extrae URLs, vistas y descripciones │
+└─────────┬──────────────────────┬───────┘
+          │                      │
+          │ 3. Diccionarios      │ 4. Lectura estructurada
+          ▼                      ▼
+┌──────────────────────┐ ┌────────────────────────────────────────┐
+│   core/exporter.py   │ │      analytics/scam_detector.py        │
+│    (DataExporter)    │ │        (FinancialScamAuditor)          │
+│ - Serializa en JSON  │ │  - Consulta gemini-embedding-001       │
+│ - Almacena en disco  │ │  - Calcula Similitud Coseno vs patrones│
+└─────────┬────────────┘ │  - Evalúa biografía y publicaciones    │
+          │              │  - Emite diagnóstico de riesgo y CLI   │
+          ▼              └───────────────────┬────────────────────┘
+  perfil_{user}.json                         │
+                                             ▼
+                                [ Reporte CLI de Auditoría ]
 ```
 
 ---
@@ -63,16 +65,20 @@ El diseño sigue el principio de responsabilidad única (SRP), separando complet
 ## 3. Estructura del Repositorio
 
 ```text
-Scrapping_Project/
+Scraping_Project/
+├── analytics/
+│   ├── __init__.py          # Declaración de paquete analítico
+│   └── scam_detector.py     # Motor semántico vectorial y reportería CLI
 ├── core/
-│   ├── __init__.py      # Declaración del paquete modular
-│   ├── client.py        # Automatización de Chromium y control de navegación
-│   ├── parser.py        # Procesamiento DOM y lectura de JSON de rehidratación
-│   └── exporter.py      # Persistencia de datos en disco (JSON)
-├── .gitignore           # Exclusión de entornos virtuales (*venv) y artefactos (*.json)
-├── main.py              # Orquestador del pipeline de ejecución
-├── README.md            # Documentación técnica del sistema
-└── requirements.txt     # Manifiesto de dependencias del entorno
+│   ├── __init__.py          # Declaración de paquete modular
+│   ├── client.py            # Automatización de Chromium y control de navegación
+│   ├── parser.py            # Procesamiento DOM y lectura de estado hidratado
+│   └── exporter.py          # Persistencia estructurada en disco (JSON)
+├── .env.example             # Plantilla de variables de entorno seguras
+├── .gitignore               # Exclusión de entornos (venv), secretos (.env) y JSONs
+├── main.py                  # Orquestador del pipeline completo de ejecución
+├── README.md                # Documentación técnica del sistema
+└── requirements.txt         # Manifiesto de dependencias del entorno
 ```
 
 ---
@@ -80,53 +86,121 @@ Scrapping_Project/
 ## 4. Descripción de Componentes
 
 ### `core/client.py` (`TikTokClient`)
-Encapsula el ciclo de vida del navegador con Playwright. No realiza ningún análisis del texto; su única responsabilidad es navegar a la URL objetivo con cabeceras que simulan un cliente de escritorio legítimo, esperar la ejecución de los scripts de TikTok, realizar eventos de desplazamiento (*scroll*) en el DOM y devolver la cadena completa del HTML resultante.
+Controla el ciclo de vida del navegador con Playwright. No efectúa transformaciones de texto; navega a la URL con cabeceras que simulan un cliente de escritorio legítimo, espera a que finalicen las solicitudes asíncronas de la SPA, ejecuta eventos de desplazamiento progresivo y devuelve el HTML final.
 
 ### `core/parser.py` (`TikTokParser`)
-Recibe el documento HTML estático y lo procesa en memoria mediante dos estrategias complementarias:
+Procesa el DOM mediante dos estrategias complementarias:
 1. **Extracción de estado (`__UNIVERSAL_DATA_FOR_REHYDRATION__`):** Lee el script JSON interno inyectado por TikTok para obtener métricas crudas exactas (seguidores, likes acumulados, videos totales, biografía).
-2. **Extracción de cuadrícula de publicaciones:** Recorre los contenedores `div[data-e2e="user-post-item"]` para estructurar la URL de cada video, su descripción completa (hashtags/emojis) y las visualizaciones registradas. Cuenta con control de límite (`limit`).
+2. **Extracción y saneamiento de publicaciones:** Recorre los contenedores `div[data-e2e="user-post-item"]`. Aísla el texto descriptivo real, separando el ruido de las plantillas por defecto de audio de TikTok (*"creado por ... con la música ..."*).
 
 ### `core/exporter.py` (`DataExporter`)
 Centraliza el almacenamiento de la información, garantizando una codificación estandarizada en UTF-8 con sangría legible (`indent=2`) sin caracteres de escape Unicode dañados.
 
+### `analytics/scam_detector.py` (`FinancialScamAuditor`)
+Módulo de inteligencia de datos que proyecta la información extraída a un espacio semántico continuo:
+* **Vectores canónicos:** Mantiene vectores de referencia precalculados para 4 modalidades clásicas de captación:
+  * `RENTABILIDAD_FACIL`: Promesas de enriquecimiento rápido sin esfuerzo.
+  * `BOTS_Y_SENALES`: Multiplicadores automáticos, arbitraje y bots garantizados.
+  * `DESVIO_CANAL_PRIVADO`: Embudos hacia Telegram/WhatsApp, venta de infoproductos o enlaces de bio (Hotmart/Linktree).
+  * `URGENCIA_PIRAMIDAL`: Falsa escasez, llamadas a dejar el empleo tradicional y venta de membresías.
+* **Métrica matemática:** Calcula la similitud coseno entre los vectores de las publicaciones/biografía ($A$) y los patrones canónicos ($B$):
+
+$$\text{Similitud}(A, B) = \frac{A \cdot B}{\Vert A \Vert \Vert B \Vert}$$
+
+* **Auditoría integral:** Analiza el texto biográfico como factor prioritario de riesgo y aplica un umbral calibrado de **0.70 - 0.72** para clasificar incidentes reales sin falsos positivos.
+
 ### `main.py`
-Punto de entrada de la aplicación. Configura los parámetros de consulta (`target_username`, `scroll_count`, `limit`), orquesta la secuencia de llamada entre los tres módulos bajo bloques `try/except/finally` y asegura la liberación adecuada de recursos del navegador.
+Punto de entrada de la aplicación. Configura los parámetros de consulta (`target_username`, `scroll_count`, `limit`), orquesta la secuencia de llamada entre scraping, parseo, exportación y auditoría, garantizando la liberación de memoria en el navegador.
 
 ---
 
-## 5. Datos Extraídos
+## 5. Pruebas Experimentales y Validación de Resultados
 
-El pipeline consolida un archivo JSON estructurado con el siguiente formato:
+Para evaluar la precisión y calibración del auditor semántico, se realizaron pruebas sobre diversos tipos de perfiles públicos:
 
+### Caso 1: Detección y corrección de falsos positivos en perfiles artísticos
+* **Perfil:** `@beele` (Músico urbano)
+* **Comportamiento inicial:** El texto de la cuadrícula extraía la plantilla por defecto: *"creado por BEÉLE con la música..."*. Con un umbral bajo (0.60), la mención a terceros generaba un falso positivo con `DESVIO_CANAL_PRIVADO`.
+* **Ajuste aplicado:** Se implementó una capa de limpieza de metadatos de audio en `scam_detector.py` y se calibró el corte a 0.70.
+* **Resultado:** **PERFIL CONFORME (Bajo Riesgo)**, índice basal ajustado y cero incidentes marcados.
+
+### Caso 2: Perfiles institucionales y financieros legítimos
+* **Perfil:** `@bancopacificoec` (Entidad bancaria regulada)
+* **Comportamiento:** A pesar de utilizar términos asociados a finanzas (*"ahorro"*, *"crédito"*, *"tarjetas"*, *"inversión"*), la intencionalidad semántica no coincide con la captación informal.
+* **Resultado:**
+  * Índice global de riesgo: 60.87 / 100 (refleja contexto financiero natural).
+  * Eventos marcados: 0.
+  * Veredicto: **PERFIL CONFORME (Bajo Riesgo)**.
+
+### Caso 3: Detección efectiva de captación de afiliados y redes de negocio
+* **Perfil:** `@hazcrecertunegocioacadem`
+* **Comportamiento:** El perfil utilizaba videos de motivación personal en combinación con un enlace de embudo en su biografía.
+* **Resultado:**
+  * Biografía marcada: `DESVIO_CANAL_PRIVADO` (72.24% de confianza) por desvío directo a Hotmart y promesa de "dejar trabajos pesados".
+  * Publicación marcada: `URGENCIA_PIRAMIDAL` (70.18% de confianza) por ganchos de ingresos y oportunidad de negocio.
+  * Veredicto: **PERFIL DE ALTO RIESGO (Patrón de Captación Detectado)**.
+
+---
+
+## 6. Salida Estructurada y Reportes CLI
+
+El sistema genera una salida en formato JSON para consumo de APIs externas y un reporte visual estructurado en terminal para auditoría en tiempo real:
+
+### Formato JSON Persistido (`perfil_{username}.json`)
 ```json
 {
   "profile": {
-    "username": "nombre_de_usuario",
-    "nickname": "Nombre Visible",
-    "bio": "Descripción pública del canal",
-    "followers": 10500,
-    "following": 12,
-    "likes": 250000,
-    "video_count": 85
+    "username": "hazcrecertunegocioacadem",
+    "nickname": "Amalia Rugama",
+    "bio": "👉 “Ayudo a mujeres trabajadoras a dejar trabajos pesados y crear su negocio online 💻✨ Marketing + ventas + clientes https://go.hotmart.com/...",
+    "followers": 28,
+    "following": 1,
+    "likes": 917,
+    "video_count": 97
   },
   "videos": [
     {
-      "url": "https://www.tiktok.com/@usuario/video/7141893901283101958",
-      "description": "Texto del video con #hashtags y menciones",
-      "views": "25.4K"
+      "url": "https://www.tiktok.com/@hazcrecertunegocioacadem/video/7671650328743349535",
+      "description": "Siempre habra otra oportunidad 🚀 #emprendedor #viral #fyp #dinero",
+      "views": "1.2K"
     }
   ]
 }
 ```
 
+### Reporte de Auditoría en Consola (CLI)
+```text
+=================================================================
+           INFORME DE AUDITORÍA VECTORIAL DE RIESGO
+=================================================================
+ Perfil auditado:      @hazcrecertunegocioacadem
+ Elementos analizados: 11
+ Eventos marcados:     2
+ Índice global:        64.39 / 100
+ Veredicto:            PERFIL DE ALTO RIESGO (Patrón de Captación Detectado)
+-----------------------------------------------------------------
+HALLAZGOS DETECTADOS:
+
+ [1] Origen:  BIOGRAFÍA
+     Patrón:  DESVIO_CANAL_PRIVADO (Confianza: 72.24%)
+     Enlace:  https://www.tiktok.com/@hazcrecertunegocioacadem
+     Texto:   "👉 “Ayudo a mujeres trabajadoras a dejar trabajos pesados y crear su negocio online 💻✨ Marketing + ventas + clientes https://go.hotmart.com/..."
+
+ [2] Origen:  PUBLICACIÓN
+     Patrón:  URGENCIA_PIRAMIDAL (Confianza: 70.18%)
+     Enlace:  https://www.tiktok.com/@hazcrecertunegocioacadem/video/7671650328743349535
+     Texto:   "Siempre habra otra oportunidad 🚀 #emprendedor #viral #fyp #dinero #love"
+=================================================================
+```
+
 ---
 
-## 6. Instalación y Puesta en Marcha
+## 7. Instalación y Puesta en Marcha
 
 ### Prerrequisitos
-- Python 3.10 o superior instalado.
-- Gestor de paquetes `pip`.
+* Python 3.10 o superior instalado.
+* Gestor de paquetes `pip`.
+* Clave de API de [Google AI Studio](https://aistudio.google.com/).
 
 ### Configuración del Entorno
 
@@ -137,19 +211,34 @@ El pipeline consolida un archivo JSON estructurado con el siguiente formato:
    ```
 
 2. **Crear y activar el entorno virtual:**
-   - En Windows (PowerShell):
+   * En Windows (PowerShell):
      ```powershell
      python -m venv venv
      .\venv\Scripts\Activate.ps1
      ```
+   * En Linux/macOS:
+     ```bash
+     python3 -m venv venv
+     source venv/bin/activate
+     ```
 
-3. **Instalar dependencias y binarios de navegador:**
-   ```powershell
+3. **Instalar dependencias y binarios del navegador:**
+   ```bash
    pip install -r requirements.txt
    playwright install chromium
    ```
 
-4. **Ejecutar el pipeline:**
-   ```powershell
+4. **Configurar variables de entorno:**
+   * Copia la plantilla `.env.example` a un archivo `.env`:
+     ```powershell
+     Copy-Item .env.example .env
+     ```
+   * Abre `.env` y define tu clave de Google Gemini:
+     ```env
+     GEMINI_API_KEY=tu_api_key_aqui
+     ```
+
+5. **Ejecutar el pipeline:**
+   ```bash
    python main.py
    ```
