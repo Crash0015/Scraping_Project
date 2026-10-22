@@ -1,10 +1,14 @@
+import json
+from analytics.scam_detector import FinancialScamAuditor
 from core.client import TikTokClient
-from core.parser import TikTokParser
 from core.exporter import DataExporter
+from core.parser import TikTokParser
+
 
 def main() -> None:
     target_username = "stailokmusic"
     target_url = f"https://www.tiktok.com/@{target_username}"
+    output_filename = f"perfil_{target_username}.json"
 
     client = TikTokClient(headless=True)
 
@@ -13,7 +17,6 @@ def main() -> None:
         client.start()
 
         print(f"[*] Navegando a: {target_url}")
-        # Con 1 scroll nos basta para asegurar más de 10 publicaciones
         html_rendered = client.fetch_rendered_html(target_url, scroll_count=1)
 
         print("[*] Procesando DOM con BeautifulSoup...")
@@ -27,17 +30,28 @@ def main() -> None:
 
         print(f"\n[+] Videos capturados (limitado a los 10 últimos): {len(video_list)}")
 
-        # Exportación en formato JSON
+        # 1. Exportación a JSON con el método de tu clase
         DataExporter.to_json(
             {"profile": profile_data, "videos": video_list},
-            f"perfil_{target_username}.json",
+            output_filename,
         )
+
+        # 2. Pipeline de Auditoría Semántica Vectorial
+        print("\n" + "=" * 60)
+        print(" AUDITORÍA SEMÁNTICA VECTORIAL (NLP DENSE EMBEDDINGS)")
+        print("=" * 60)
+        auditor = FinancialScamAuditor()
+        audit_result = auditor.audit_profile_risk(output_filename)
+
+        print("\n[+] Reporte de Auditoría:")
+        print(json.dumps(audit_result, indent=2, ensure_ascii=False))
 
     except Exception as error:
         print(f"[-] Error en el proceso: {error}")
     finally:
         client.close()
         print("[*] Sesión del navegador finalizada.")
+
 
 if __name__ == "__main__":
     main()

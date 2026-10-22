@@ -17,3 +17,7 @@ downloads/
 .vscode/
 .idea/
 Thumbs.db
+
+.env
+analytics/__pycache__/
+core/__pycache__/
