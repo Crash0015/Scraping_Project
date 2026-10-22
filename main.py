@@ -6,7 +6,7 @@ from core.parser import TikTokParser
 
 
 def main() -> None:
-    target_username = "stailokmusic"
+    target_username = "hazcrecertunegocioacadem"
     target_url = f"https://www.tiktok.com/@{target_username}"
     output_filename = f"perfil_{target_username}.json"
 

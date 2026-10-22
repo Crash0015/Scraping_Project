@@ -98,16 +98,54 @@ class FinancialScamAuditor:
         profile = data.get("profile", {})
         username = profile.get("username", "desconocido")
 
-        valid_posts = [v for v in videos if v.get("description", "").strip()]
-        if not valid_posts:
-            return {"error": "Sin publicaciones con texto para auditar."}
+        # Limpiar texto de plantillas sin descartar el video
+        valid_posts = []
+        cleaned_descriptions = []
 
-        descriptions = [v["description"].strip() for v in valid_posts]
+        for v in videos:
+            desc = v.get("description", "").strip()
+            if not desc:
+                continue
+
+            # Si es solo la plantilla estándar de TikTok, extraer lo útil
+            clean_text = desc
+            if clean_text.lower().startswith("creado por"):
+                # Quitar el prefijo automático si existe contenido posterior
+                parts = clean_text.split("con la música")
+                clean_text = (
+                    parts[0]
+                    .replace(f"creado por {profile.get('nickname', '')}", "")
+                    .replace("creado por", "")
+                    .strip()
+                )
+
+            # Si quedó texto significativo (más de 3 letras), lo agregamos
+            if len(clean_text) > 3:
+                valid_posts.append(v)
+                cleaned_descriptions.append(clean_text)
+            elif len(desc) > 3:
+                # Si no se pudo limpiar pero hay texto original, conservarlo
+                valid_posts.append(v)
+                cleaned_descriptions.append(desc)
+
+        if not valid_posts:
+            return {
+                "audited_profile": f"@{username}",
+                "posts_analyzed": 0,
+                "flagged_posts_count": 0,
+                "global_risk_index": "0.0 / 100",
+                "verdict": (
+                    "PERFIL CONFORME (Publicaciones sin texto descriptivo"
+                    " extraíble)"
+                ),
+                "flagged_cases": [],
+            }
 
         print(
-            f"[*] Generando embeddings para {len(descriptions)} publicaciones..."
+            f"[*] Generando embeddings para {len(cleaned_descriptions)}"
+            " publicaciones..."
         )
-        content_embeddings = self._get_embeddings(descriptions)
+        content_embeddings = self._get_embeddings(cleaned_descriptions)
 
         flagged_events = []
         max_scores_per_post = []
@@ -123,12 +161,13 @@ class FinancialScamAuditor:
             max_score = post_scores[max_sim_idx]
             max_scores_per_post.append(max_score)
 
-            if max_score >= 0.60:
+            # Umbral calibrado para detección real
+            if max_score >= 0.72:
                 flagged_events.append({
                     "url": valid_posts[i].get("url"),
                     "matched_pattern": self.pattern_labels[max_sim_idx],
                     "confidence": f"{round(max_score * 100, 2)}%",
-                    "excerpt": descriptions[i],
+                    "excerpt": cleaned_descriptions[i],
                 })
 
         risk_score = round(
@@ -137,7 +176,7 @@ class FinancialScamAuditor:
 
         return {
             "audited_profile": f"@{username}",
-            "posts_analyzed": len(descriptions),
+            "posts_analyzed": len(cleaned_descriptions),
             "flagged_posts_count": len(flagged_events),
             "global_risk_index": f"{risk_score} / 100",
             "verdict": (
